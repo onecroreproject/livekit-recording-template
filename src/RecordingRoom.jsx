@@ -12,7 +12,9 @@ export default function RecordingRoom() {
   const room = useRoomContext();
   const recordingStarted = useRef(false);
 
+  // --------------------------------------------------
   // Register room with Egress
+  // --------------------------------------------------
   useEffect(() => {
     if (!room) return;
 
@@ -27,29 +29,11 @@ export default function RecordingRoom() {
     }
   }, [room]);
 
-  /*
-   * Explicitly check and subscribe to video tracks.
-   */
+  // --------------------------------------------------
+  // Subscribe to all remote video tracks
+  // --------------------------------------------------
   useEffect(() => {
     if (!room) return;
-
-    let started = false;
-
-    const startRecording = () => {
-      if (started) return;
-
-      started = true;
-
-      console.log(
-        '[Recording Template] START_RECORDING signal'
-      );
-
-      EgressHelper.startRecording();
-
-      console.log(
-        '[Recording Template] Egress recording started'
-      );
-    };
 
     const subscribeToVideo = async (participant) => {
       for (const publication of participant.trackPublications.values()) {
@@ -60,30 +44,46 @@ export default function RecordingRoom() {
         if (!isVideo) continue;
 
         console.log(
-          '[Recording Template] Video publication:',
-          participant.identity,
-          publication.source,
-          'subscribed:',
-          publication.isSubscribed,
-          'hasTrack:',
-          !!publication.track
+          '[Recording Template] VIDEO PUBLICATION',
+          {
+            participant: participant.identity,
+            source: publication.source,
+            trackSid: publication.trackSid,
+            subscribed: publication.isSubscribed,
+            hasTrack: !!publication.track,
+          }
         );
 
-        if (!publication.isSubscribed) {
-          try {
+        try {
+          if (!publication.isSubscribed) {
             await publication.setSubscribed(true);
 
             console.log(
-              '[Recording Template] Explicitly subscribed:',
+              '[Recording Template] SUBSCRIBED',
               participant.identity,
               publication.source
             );
-          } catch (error) {
-            console.error(
-              '[Recording Template] Video subscription failed:',
-              error
-            );
           }
+
+          // Give LiveKit a moment to attach the track.
+          await new Promise((resolve) => setTimeout(resolve, 200));
+
+          console.log(
+            '[Recording Template] AFTER SUBSCRIBE',
+            {
+              participant: participant.identity,
+              source: publication.source,
+              subscribed: publication.isSubscribed,
+              hasTrack: !!publication.track,
+            }
+          );
+        } catch (error) {
+          console.error(
+            '[Recording Template] VIDEO SUBSCRIBE ERROR',
+            participant.identity,
+            publication.source,
+            error
+          );
         }
       }
     };
@@ -96,18 +96,15 @@ export default function RecordingRoom() {
     // New participant
     const handleParticipantConnected = (participant) => {
       console.log(
-        '[Recording Template] Participant connected:',
+        '[Recording Template] PARTICIPANT CONNECTED',
         participant.identity
       );
 
       subscribeToVideo(participant);
     };
 
-    // New video publication
-    const handleTrackPublished = (
-      publication,
-      participant
-    ) => {
+    // New publication
+    const handleTrackPublished = (publication, participant) => {
       const isVideo =
         publication.source === Track.Source.Camera ||
         publication.source === Track.Source.ScreenShare;
@@ -115,12 +112,39 @@ export default function RecordingRoom() {
       if (!isVideo) return;
 
       console.log(
-        '[Recording Template] Video published:',
-        participant.identity,
-        publication.source
+        '[Recording Template] TRACK PUBLISHED',
+        {
+          participant: participant.identity,
+          source: publication.source,
+          trackSid: publication.trackSid,
+        }
       );
 
       subscribeToVideo(participant);
+    };
+
+    // Track subscribed
+    const handleTrackSubscribed = (
+      track,
+      publication,
+      participant
+    ) => {
+      if (
+        publication.source !== Track.Source.Camera &&
+        publication.source !== Track.Source.ScreenShare
+      ) {
+        return;
+      }
+
+      console.log(
+        '[Recording Template] TRACK SUBSCRIBED',
+        {
+          participant: participant.identity,
+          source: publication.source,
+          trackSid: publication.trackSid,
+          kind: track.kind,
+        }
+      );
     };
 
     room.on(
@@ -133,19 +157,29 @@ export default function RecordingRoom() {
       handleTrackPublished
     );
 
-    /*
-     * IMPORTANT:
-     * Start Egress independently of video.
-     *
-     * This prevents:
-     * "Start signal not received"
-     */
+    room.on(
+      RoomEvent.TrackSubscribed,
+      handleTrackSubscribed
+    );
+
+    // --------------------------------------------------
+    // IMPORTANT
+    // Keep Egress start independent from video.
+    // --------------------------------------------------
     const startTimer = setTimeout(() => {
+      if (recordingStarted.current) return;
+
+      recordingStarted.current = true;
+
       console.log(
-        '[Recording Template] Starting Egress after room initialization'
+        '[Recording Template] START_RECORDING signal'
       );
 
-      startRecording();
+      EgressHelper.startRecording();
+
+      console.log(
+        '[Recording Template] Egress recording started'
+      );
     }, 3000);
 
     return () => {
@@ -160,12 +194,17 @@ export default function RecordingRoom() {
         RoomEvent.TrackPublished,
         handleTrackPublished
       );
+
+      room.off(
+        RoomEvent.TrackSubscribed,
+        handleTrackSubscribed
+      );
     };
   }, [room]);
 
-  /*
-   * ALL subscribed camera tracks.
-   */
+  // --------------------------------------------------
+  // Camera tracks
+  // --------------------------------------------------
   const cameraTracks = useTracks(
     [
       {
@@ -178,9 +217,9 @@ export default function RecordingRoom() {
     }
   );
 
-  /*
-   * ALL subscribed screen-share tracks.
-   */
+  // --------------------------------------------------
+  // Screen-share tracks
+  // --------------------------------------------------
   const screenShareTracks = useTracks(
     [
       {
@@ -193,56 +232,65 @@ export default function RecordingRoom() {
     }
   );
 
-  /*
-   * Debug information.
-   */
+  // --------------------------------------------------
+  // Debug
+  // --------------------------------------------------
   console.log(
-    '[Recording Template] CAMERA TRACKS:',
+    '[Recording Template] CAMERA TRACKS',
     cameraTracks.map((t) => ({
       identity: t.participant?.identity,
       source: t.source,
       hasTrack: !!t.track,
       subscribed: t.publication?.isSubscribed,
-      sid: t.publication?.trackSid,
+      trackSid: t.publication?.trackSid,
     }))
   );
 
   console.log(
-    '[Recording Template] SCREEN TRACKS:',
+    '[Recording Template] SCREEN TRACKS',
     screenShareTracks.map((t) => ({
       identity: t.participant?.identity,
       source: t.source,
       hasTrack: !!t.track,
       subscribed: t.publication?.isSubscribed,
-      sid: t.publication?.trackSid,
+      trackSid: t.publication?.trackSid,
     }))
   );
 
-  /*
-   * Remove only the Egress recorder participant.
-   */
+  // --------------------------------------------------
+  // Remove Egress recorder
+  // --------------------------------------------------
   const validCameras = cameraTracks.filter((trackRef) => {
     const identity =
       trackRef.participant?.identity?.toLowerCase() || '';
 
-    return !identity.includes('egress') &&
+    return (
+      !identity.includes('egress') &&
       !identity.includes('recorder') &&
-      !!trackRef.track;
+      !!trackRef.track
+    );
   });
 
   const validScreens = screenShareTracks.filter((trackRef) => {
     const identity =
       trackRef.participant?.identity?.toLowerCase() || '';
 
-    return !identity.includes('egress') &&
+    return (
+      !identity.includes('egress') &&
       !identity.includes('recorder') &&
-      !!trackRef.track;
+      !!trackRef.track
+    );
   });
 
-  /*
-   * SCREEN SHARE HAS PRIORITY.
-   */
+  // --------------------------------------------------
+  // Screen share priority
+  // --------------------------------------------------
   if (validScreens.length > 0) {
+    console.log(
+      '[Recording Template] RENDERING SCREEN SHARE',
+      validScreens[0].participant?.identity
+    );
+
     return (
       <div className="recording-container">
         <RoomAudioRenderer />
@@ -257,14 +305,19 @@ export default function RecordingRoom() {
     );
   }
 
-  /*
-   * OTHERWISE SHOW ALL CAMERAS.
-   */
-  return (
-    <div className="recording-container">
-      <RoomAudioRenderer />
+  // --------------------------------------------------
+  // Camera grid
+  // --------------------------------------------------
+  if (validCameras.length > 0) {
+    console.log(
+      '[Recording Template] RENDERING CAMERAS',
+      validCameras.length
+    );
 
-      {validCameras.length > 0 ? (
+    return (
+      <div className="recording-container">
+        <RoomAudioRenderer />
+
         <div
           className="multi-camera-grid"
           data-count={Math.min(validCameras.length, 9)}
@@ -277,11 +330,20 @@ export default function RecordingRoom() {
             />
           ))}
         </div>
-      ) : (
-        <div className="waiting-video">
-          Waiting for video tracks...
-        </div>
-      )}
+      </div>
+    );
+  }
+
+  // --------------------------------------------------
+  // No video yet
+  // --------------------------------------------------
+  return (
+    <div className="recording-container">
+      <RoomAudioRenderer />
+
+      <div className="waiting-video">
+        Waiting for video tracks...
+      </div>
     </div>
   );
 }
