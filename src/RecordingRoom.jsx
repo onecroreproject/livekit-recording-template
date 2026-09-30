@@ -28,75 +28,101 @@ export default function RecordingRoom() {
   }, [room]);
 
   /*
-   * Wait specifically for a VIDEO track before starting Egress.
+   * Explicitly check and subscribe to video tracks.
    */
   useEffect(() => {
-    if (!room || recordingStarted.current) return;
+    if (!room) return;
 
-    const startRecording = () => {
-      if (recordingStarted.current) return;
+    console.log('[Recording Template] Checking remote video publications...');
 
-      console.log(
-        '[Recording Template] Video track available - starting Egress'
-      );
-
-      EgressHelper.startRecording();
-
-      recordingStarted.current = true;
-
-      console.log('[Recording Template] Egress recording started');
-    };
-
-    // Check already subscribed tracks
-    for (const participant of room.remoteParticipants.values()) {
+    const subscribeToVideo = async (participant) => {
       for (const publication of participant.trackPublications.values()) {
-        if (
-          publication.track &&
-          (
-            publication.source === Track.Source.Camera ||
-            publication.source === Track.Source.ScreenShare
-          )
-        ) {
-          console.log(
-            '[Recording Template] Existing video:',
-            participant.identity,
-            publication.source
-          );
+        const isVideo =
+          publication.source === Track.Source.Camera ||
+          publication.source === Track.Source.ScreenShare;
 
-          startRecording();
-          return;
+        if (!isVideo) continue;
+
+        console.log('[Recording Template] Video publication found:', {
+          identity: participant.identity,
+          source: publication.source,
+          trackSid: publication.trackSid,
+          subscribed: publication.isSubscribed,
+          hasTrack: !!publication.track,
+        });
+
+        if (!publication.isSubscribed) {
+          try {
+            await publication.setSubscribed(true);
+
+            console.log(
+              '[Recording Template] Explicitly subscribed:',
+              participant.identity,
+              publication.source
+            );
+          } catch (error) {
+            console.error(
+              '[Recording Template] Failed to subscribe:',
+              participant.identity,
+              publication.source,
+              error
+            );
+          }
         }
       }
+    };
+
+    // Existing participants
+    for (const participant of room.remoteParticipants.values()) {
+      subscribeToVideo(participant);
     }
 
-    const handleTrackSubscribed = (
-      track,
-      publication,
-      participant
-    ) => {
+    // New participant joins
+    const handleParticipantConnected = (participant) => {
       console.log(
-        '[Recording Template] Track subscribed:',
-        participant?.identity,
-        publication?.source
+        '[Recording Template] Participant connected:',
+        participant.identity
       );
 
-      if (
-        publication?.source === Track.Source.Camera ||
-        publication?.source === Track.Source.ScreenShare
-      ) {
-        startRecording();
-      }
+      subscribeToVideo(participant);
+    };
+
+    // New publication
+    const handleTrackPublished = (publication, participant) => {
+      const isVideo =
+        publication.source === Track.Source.Camera ||
+        publication.source === Track.Source.ScreenShare;
+
+      if (!isVideo) return;
+
+      console.log('[Recording Template] Video track published:', {
+        identity: participant.identity,
+        source: publication.source,
+        trackSid: publication.trackSid,
+      });
+
+      subscribeToVideo(participant);
     };
 
     room.on(
-      RoomEvent.TrackSubscribed,
-      handleTrackSubscribed
+      RoomEvent.ParticipantConnected,
+      handleParticipantConnected
+    );
+
+    room.on(
+      RoomEvent.TrackPublished,
+      handleTrackPublished
     );
 
     return () => {
       room.off(
-        RoomEvent.TrackSubscribed,
-        handleTrackSubscribed
+        RoomEvent.ParticipantConnected,
+        handleParticipantConnected
+      );
+
+      room.off(
+        RoomEvent.TrackPublished,
+        handleTrackPublished
       );
     };
   }, [room]);
