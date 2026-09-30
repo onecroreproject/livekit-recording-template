@@ -33,7 +33,23 @@ export default function RecordingRoom() {
   useEffect(() => {
     if (!room) return;
 
-    console.log('[Recording Template] Checking remote video publications...');
+    let recordingStarted = false;
+
+    const startRecording = () => {
+      if (recordingStarted) return;
+
+      console.log(
+        '[Recording Template] Video track available - starting Egress'
+      );
+
+      EgressHelper.startRecording();
+
+      recordingStarted = true;
+
+      console.log(
+        '[Recording Template] Egress recording started'
+      );
+    };
 
     const subscribeToVideo = async (participant) => {
       for (const publication of participant.trackPublications.values()) {
@@ -43,14 +59,17 @@ export default function RecordingRoom() {
 
         if (!isVideo) continue;
 
-        console.log('[Recording Template] Video publication found:', {
-          identity: participant.identity,
-          source: publication.source,
-          trackSid: publication.trackSid,
-          subscribed: publication.isSubscribed,
-          hasTrack: !!publication.track,
-        });
+        console.log(
+          '[Recording Template] Video publication:',
+          participant.identity,
+          publication.source,
+          'subscribed:',
+          publication.isSubscribed,
+          'hasTrack:',
+          !!publication.track
+        );
 
+        // Explicitly subscribe
         if (!publication.isSubscribed) {
           try {
             await publication.setSubscribed(true);
@@ -62,12 +81,18 @@ export default function RecordingRoom() {
             );
           } catch (error) {
             console.error(
-              '[Recording Template] Failed to subscribe:',
+              '[Recording Template] Subscribe failed:',
               participant.identity,
               publication.source,
               error
             );
           }
+        }
+
+        // If track is already available
+        if (publication.track) {
+          startRecording();
+          return;
         }
       }
     };
@@ -77,7 +102,7 @@ export default function RecordingRoom() {
       subscribeToVideo(participant);
     }
 
-    // New participant joins
+    // New participant
     const handleParticipantConnected = (participant) => {
       console.log(
         '[Recording Template] Participant connected:',
@@ -88,20 +113,43 @@ export default function RecordingRoom() {
     };
 
     // New publication
-    const handleTrackPublished = (publication, participant) => {
+    const handleTrackPublished = (
+      publication,
+      participant
+    ) => {
       const isVideo =
         publication.source === Track.Source.Camera ||
         publication.source === Track.Source.ScreenShare;
 
       if (!isVideo) return;
 
-      console.log('[Recording Template] Video track published:', {
-        identity: participant.identity,
-        source: publication.source,
-        trackSid: publication.trackSid,
-      });
+      console.log(
+        '[Recording Template] Video published:',
+        participant.identity,
+        publication.source
+      );
 
       subscribeToVideo(participant);
+    };
+
+    // Actual track becomes available
+    const handleTrackSubscribed = (
+      track,
+      publication,
+      participant
+    ) => {
+      console.log(
+        '[Recording Template] Track subscribed:',
+        participant?.identity,
+        publication?.source
+      );
+
+      if (
+        publication?.source === Track.Source.Camera ||
+        publication?.source === Track.Source.ScreenShare
+      ) {
+        startRecording();
+      }
     };
 
     room.on(
@@ -114,6 +162,11 @@ export default function RecordingRoom() {
       handleTrackPublished
     );
 
+    room.on(
+      RoomEvent.TrackSubscribed,
+      handleTrackSubscribed
+    );
+
     return () => {
       room.off(
         RoomEvent.ParticipantConnected,
@@ -123,6 +176,11 @@ export default function RecordingRoom() {
       room.off(
         RoomEvent.TrackPublished,
         handleTrackPublished
+      );
+
+      room.off(
+        RoomEvent.TrackSubscribed,
+        handleTrackSubscribed
       );
     };
   }, [room]);
