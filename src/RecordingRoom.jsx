@@ -63,44 +63,41 @@ export default function RecordingRoom() {
    */
   useEffect(() => {
     if (!room) return;
+    if (recordingStarted.current) return;
 
-    if (room.state !== 'connected') {
-      return;
-    }
+    const startRecording = () => {
+      if (recordingStarted.current) return;
 
-    if (recordingStarted.current) {
-      return;
-    }
+      console.log('[Recording Template] Remote track available');
+      console.log('[Recording Template] Sending Egress START_RECORDING signal');
 
-    const startRecording = async () => {
-      try {
-        // Give React/browser one frame to render the layout.
-        await new Promise((resolve) =>
-          requestAnimationFrame(() => resolve())
-        );
+      EgressHelper.startRecording();
 
-        await new Promise((resolve) => setTimeout(resolve, 300));
+      recordingStarted.current = true;
 
-        console.log(
-          '[Recording Template] Sending Egress START_RECORDING signal'
-        );
-
-        EgressHelper.startRecording();
-
-        recordingStarted.current = true;
-
-        console.log(
-          '[Recording Template] Egress recording started'
-        );
-      } catch (error) {
-        console.error(
-          '[Recording Template] Failed to start Egress recording:',
-          error
-        );
-      }
+      console.log('[Recording Template] Egress recording started');
     };
 
-    startRecording();
+    // Check if a remote participant already has tracks
+    for (const participant of room.remoteParticipants.values()) {
+      for (const publication of participant.trackPublications.values()) {
+        if (publication.track) {
+          startRecording();
+          return;
+        }
+      }
+    }
+
+    // Otherwise wait for the first subscribed track
+    const handleTrackSubscribed = () => {
+      startRecording();
+    };
+
+    room.on('trackSubscribed', handleTrackSubscribed);
+
+    return () => {
+      room.off('trackSubscribed', handleTrackSubscribed);
+    };
   }, [room]);
 
   /*
