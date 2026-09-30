@@ -1,51 +1,23 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   useTracks,
   RoomAudioRenderer,
   VideoTrack,
   useRoomContext,
 } from '@livekit/components-react';
-import { Track } from 'livekit-client';
+import { Track, RoomEvent } from 'livekit-client';
 import EgressHelper from '@livekit/egress-sdk';
-
-// Determine whether participant is teacher or student
-const getParticipantRole = (participant) => {
-  if (participant.metadata) {
-    try {
-      const meta = JSON.parse(participant.metadata);
-
-      if (meta?.role) {
-        return meta.role.toLowerCase();
-      }
-    } catch (error) {
-      console.warn('Unable to parse participant metadata:', error);
-    }
-  }
-
-  // Development fallback only
-  if (
-    participant.identity &&
-    participant.identity.toLowerCase().includes('teacher')
-  ) {
-    return 'teacher';
-  }
-
-  return 'student';
-};
 
 export default function RecordingRoom() {
   const room = useRoomContext();
   const recordingStarted = useRef(false);
 
-  /*
-   * Register the connected LiveKit Room with Egress.
-   */
+  // Register room with Egress
   useEffect(() => {
     if (!room) return;
 
     try {
       EgressHelper.setRoom(room);
-
       console.log('[Recording Template] Egress room registered');
     } catch (error) {
       console.error(
@@ -56,20 +28,17 @@ export default function RecordingRoom() {
   }, [room]);
 
   /*
-   * Start recording after the room is connected.
-   *
-   * We wait until React has rendered the layout before sending
-   * the START_RECORDING signal.
+   * Wait specifically for a VIDEO track before starting Egress.
    */
   useEffect(() => {
-    if (!room) return;
-    if (recordingStarted.current) return;
+    if (!room || recordingStarted.current) return;
 
     const startRecording = () => {
       if (recordingStarted.current) return;
 
-      console.log('[Recording Template] Remote track available');
-      console.log('[Recording Template] Sending Egress START_RECORDING signal');
+      console.log(
+        '[Recording Template] Video track available - starting Egress'
+      );
 
       EgressHelper.startRecording();
 
@@ -78,166 +47,167 @@ export default function RecordingRoom() {
       console.log('[Recording Template] Egress recording started');
     };
 
-    // Check if a remote participant already has tracks
+    // Check already subscribed tracks
     for (const participant of room.remoteParticipants.values()) {
       for (const publication of participant.trackPublications.values()) {
-        if (publication.track) {
+        if (
+          publication.track &&
+          (
+            publication.source === Track.Source.Camera ||
+            publication.source === Track.Source.ScreenShare
+          )
+        ) {
+          console.log(
+            '[Recording Template] Existing video:',
+            participant.identity,
+            publication.source
+          );
+
           startRecording();
           return;
         }
       }
     }
 
-    // Otherwise wait for the first subscribed track
-    const handleTrackSubscribed = () => {
-      startRecording();
+    const handleTrackSubscribed = (
+      track,
+      publication,
+      participant
+    ) => {
+      console.log(
+        '[Recording Template] Track subscribed:',
+        participant?.identity,
+        publication?.source
+      );
+
+      if (
+        publication?.source === Track.Source.Camera ||
+        publication?.source === Track.Source.ScreenShare
+      ) {
+        startRecording();
+      }
     };
 
-    room.on('trackSubscribed', handleTrackSubscribed);
+    room.on(
+      RoomEvent.TrackSubscribed,
+      handleTrackSubscribed
+    );
 
     return () => {
-      room.off('trackSubscribed', handleTrackSubscribed);
+      room.off(
+        RoomEvent.TrackSubscribed,
+        handleTrackSubscribed
+      );
     };
   }, [room]);
 
   /*
-   * Camera tracks
+   * ALL subscribed camera tracks.
    */
   const cameraTracks = useTracks(
-    [Track.Source.Camera],
+    [
+      {
+        source: Track.Source.Camera,
+        withPlaceholder: false,
+      },
+    ],
     {
       onlySubscribed: true,
     }
   );
 
   /*
-   * Screen-share tracks
+   * ALL subscribed screen-share tracks.
    */
   const screenShareTracks = useTracks(
-    [Track.Source.ScreenShare],
+    [
+      {
+        source: Track.Source.ScreenShare,
+        withPlaceholder: false,
+      },
+    ],
     {
       onlySubscribed: true,
     }
   );
 
   /*
-   * Remove recorder/egress participants.
+   * Debug information.
    */
-  const filterValidTracks = (tracks) => {
-    return tracks.filter((trackRef) => {
-      const identity =
-        trackRef.participant.identity?.toLowerCase() || '';
-
-      const isEgress =
-        identity.includes('egress') ||
-        identity.includes('recorder');
-
-      return (
-        !isEgress &&
-        trackRef.publication?.isSubscribed &&
-        trackRef.track
-      );
-    });
-  };
-
-  const validCameras = useMemo(
-    () => filterValidTracks(cameraTracks),
-    [cameraTracks]
+  console.log(
+    '[Recording Template] CAMERA TRACKS:',
+    cameraTracks.map((t) => ({
+      identity: t.participant?.identity,
+      source: t.source,
+      hasTrack: !!t.track,
+      subscribed: t.publication?.isSubscribed,
+      sid: t.publication?.trackSid,
+    }))
   );
 
-  const validScreens = useMemo(
-    () => filterValidTracks(screenShareTracks),
-    [screenShareTracks]
+  console.log(
+    '[Recording Template] SCREEN TRACKS:',
+    screenShareTracks.map((t) => ({
+      identity: t.participant?.identity,
+      source: t.source,
+      hasTrack: !!t.track,
+      subscribed: t.publication?.isSubscribed,
+      sid: t.publication?.trackSid,
+    }))
   );
 
   /*
-   * Identify teacher screen, teacher camera,
-   * and student cameras.
+   * Remove only the Egress recorder participant.
    */
-  const {
-    teacherScreenShare,
-    teacherCamera,
-    studentCameras,
-  } = useMemo(() => {
-    let teacherScreen = null;
-    let teacherCam = null;
-    const students = [];
+  const validCameras = cameraTracks.filter((trackRef) => {
+    const identity =
+      trackRef.participant?.identity?.toLowerCase() || '';
 
-    /*
-     * Teacher screen share
-     */
-    for (const trackRef of validScreens) {
-      if (
-        getParticipantRole(trackRef.participant) === 'teacher'
-      ) {
-        teacherScreen = trackRef;
-        break;
-      }
-    }
+    return !identity.includes('egress') &&
+      !identity.includes('recorder') &&
+      !!trackRef.track;
+  });
 
-    /*
-     * Cameras
-     */
-    for (const trackRef of validCameras) {
-      const role = getParticipantRole(
-        trackRef.participant
-      );
+  const validScreens = screenShareTracks.filter((trackRef) => {
+    const identity =
+      trackRef.participant?.identity?.toLowerCase() || '';
 
-      if (role === 'teacher') {
-        if (!teacherCam) {
-          teacherCam = trackRef;
-        }
-      } else {
-        students.push(trackRef);
-      }
-    }
-
-    return {
-      teacherScreenShare: teacherScreen,
-      teacherCamera: teacherCam,
-      studentCameras: students,
-    };
-  }, [validCameras, validScreens]);
+    return !identity.includes('egress') &&
+      !identity.includes('recorder') &&
+      !!trackRef.track;
+  });
 
   /*
-   * When teacher screen sharing:
-   *
-   * ONLY teacher screen share is visible.
-   *
-   * When screen sharing is not active:
-   *
-   * teacher camera + student cameras.
+   * SCREEN SHARE HAS PRIORITY.
    */
-  const activeCameras = [];
+  if (validScreens.length > 0) {
+    return (
+      <div className="recording-container">
+        <RoomAudioRenderer />
 
-  if (teacherCamera) {
-    activeCameras.push(teacherCamera);
-  }
-
-  activeCameras.push(...studentCameras);
-
-  return (
-    <div className="recording-container">
-
-      {/* Keep all room audio active continuously */}
-      <RoomAudioRenderer />
-
-      {teacherScreenShare ? (
         <div className="teacher-screen">
           <VideoTrack
-            trackRef={teacherScreenShare}
+            trackRef={validScreens[0]}
             className="video-element"
           />
         </div>
-      ) : activeCameras.length > 0 ? (
+      </div>
+    );
+  }
+
+  /*
+   * OTHERWISE SHOW ALL CAMERAS.
+   */
+  return (
+    <div className="recording-container">
+      <RoomAudioRenderer />
+
+      {validCameras.length > 0 ? (
         <div
           className="multi-camera-grid"
-          data-count={Math.min(
-            activeCameras.length,
-            9
-          )}
+          data-count={Math.min(validCameras.length, 9)}
         >
-          {activeCameras.map((trackRef) => (
+          {validCameras.map((trackRef) => (
             <VideoTrack
               key={trackRef.publication.trackSid}
               trackRef={trackRef}
@@ -245,8 +215,11 @@ export default function RecordingRoom() {
             />
           ))}
         </div>
-      ) : null}
-
+      ) : (
+        <div className="waiting-video">
+          Waiting for video tracks...
+        </div>
+      )}
     </div>
   );
 }
