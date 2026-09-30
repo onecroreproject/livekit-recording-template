@@ -33,18 +33,18 @@ export default function RecordingRoom() {
   useEffect(() => {
     if (!room) return;
 
-    let recordingStarted = false;
+    let started = false;
 
     const startRecording = () => {
-      if (recordingStarted) return;
+      if (started) return;
+
+      started = true;
 
       console.log(
-        '[Recording Template] Video track available - starting Egress'
+        '[Recording Template] START_RECORDING signal'
       );
 
       EgressHelper.startRecording();
-
-      recordingStarted = true;
 
       console.log(
         '[Recording Template] Egress recording started'
@@ -69,7 +69,6 @@ export default function RecordingRoom() {
           !!publication.track
         );
 
-        // Explicitly subscribe
         if (!publication.isSubscribed) {
           try {
             await publication.setSubscribed(true);
@@ -81,18 +80,10 @@ export default function RecordingRoom() {
             );
           } catch (error) {
             console.error(
-              '[Recording Template] Subscribe failed:',
-              participant.identity,
-              publication.source,
+              '[Recording Template] Video subscription failed:',
               error
             );
           }
-        }
-
-        // If track is already available
-        if (publication.track) {
-          startRecording();
-          return;
         }
       }
     };
@@ -112,7 +103,7 @@ export default function RecordingRoom() {
       subscribeToVideo(participant);
     };
 
-    // New publication
+    // New video publication
     const handleTrackPublished = (
       publication,
       participant
@@ -132,26 +123,6 @@ export default function RecordingRoom() {
       subscribeToVideo(participant);
     };
 
-    // Actual track becomes available
-    const handleTrackSubscribed = (
-      track,
-      publication,
-      participant
-    ) => {
-      console.log(
-        '[Recording Template] Track subscribed:',
-        participant?.identity,
-        publication?.source
-      );
-
-      if (
-        publication?.source === Track.Source.Camera ||
-        publication?.source === Track.Source.ScreenShare
-      ) {
-        startRecording();
-      }
-    };
-
     room.on(
       RoomEvent.ParticipantConnected,
       handleParticipantConnected
@@ -162,12 +133,24 @@ export default function RecordingRoom() {
       handleTrackPublished
     );
 
-    room.on(
-      RoomEvent.TrackSubscribed,
-      handleTrackSubscribed
-    );
+    /*
+     * IMPORTANT:
+     * Start Egress independently of video.
+     *
+     * This prevents:
+     * "Start signal not received"
+     */
+    const startTimer = setTimeout(() => {
+      console.log(
+        '[Recording Template] Starting Egress after room initialization'
+      );
+
+      startRecording();
+    }, 3000);
 
     return () => {
+      clearTimeout(startTimer);
+
       room.off(
         RoomEvent.ParticipantConnected,
         handleParticipantConnected
@@ -176,11 +159,6 @@ export default function RecordingRoom() {
       room.off(
         RoomEvent.TrackPublished,
         handleTrackPublished
-      );
-
-      room.off(
-        RoomEvent.TrackSubscribed,
-        handleTrackSubscribed
       );
     };
   }, [room]);
