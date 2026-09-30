@@ -10,26 +10,37 @@ function App() {
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
+
       const urlParam = params.get('url');
       const tokenParam = params.get('token');
-      
-      if (urlParam && tokenParam) {
-        setUrl(urlParam);
-        setToken(tokenParam);
-      } else {
+
+      if (!urlParam || !tokenParam) {
         setError('Missing LiveKit URL or token in query parameters');
+        return;
       }
+
+      setUrl(urlParam);
+      setToken(tokenParam);
     } catch (err) {
+      console.error('Template initialization error:', err);
       setError(err.message);
     }
   }, []);
 
   if (error) {
-    return <div style={{ color: 'white' }}>Error: {error}</div>;
+    return (
+      <div style={{ color: 'white', padding: '20px' }}>
+        Error: {error}
+      </div>
+    );
   }
 
   if (!url || !token) {
-    return <div style={{ color: 'white' }}>Waiting for configuration...</div>;
+    return (
+      <div style={{ color: 'white', padding: '20px' }}>
+        Waiting for configuration...
+      </div>
+    );
   }
 
   return (
@@ -37,8 +48,8 @@ function App() {
       serverUrl={url}
       token={token}
       connect={true}
-      video={false} // don't publish local video
-      audio={false} // don't publish local audio
+      video={false}
+      audio={false}
     >
       <RecordingRoom />
     </LiveKitRoom>
