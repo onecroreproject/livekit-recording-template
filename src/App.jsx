@@ -50,6 +50,10 @@ function App() {
       connect={true}
       video={false}
       audio={false}
+      options={{
+        adaptiveStream: false,
+        dynacast: false,
+      }}
     >
       <RecordingRoom />
     </LiveKitRoom>

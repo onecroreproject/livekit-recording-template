@@ -213,7 +213,7 @@ export default function RecordingRoom() {
       },
     ],
     {
-      onlySubscribed: true,
+      onlySubscribed: false,
     }
   );
 
@@ -228,59 +228,32 @@ export default function RecordingRoom() {
       },
     ],
     {
-      onlySubscribed: true,
+      onlySubscribed: false,
     }
   );
 
   // --------------------------------------------------
-  // Debug
+  // Filter active, unmuted video tracks (excluding egress/recorder)
+  // In LiveKit, TrackReference has .publication; the track is at .publication.track
+  // and muted state is at .publication.isMuted.
   // --------------------------------------------------
-  console.log(
-    '[Recording Template] CAMERA TRACKS',
-    cameraTracks.map((t) => ({
-      identity: t.participant?.identity,
-      source: t.source,
-      hasTrack: !!t.track,
-      subscribed: t.publication?.isSubscribed,
-      trackSid: t.publication?.trackSid,
-    }))
-  );
+  const isVideoTrackActive = (trackRef) => {
+    if (!trackRef) return false;
+    const identity = trackRef.participant?.identity?.toLowerCase() || '';
+    if (identity.includes('egress') || identity.includes('recorder')) return false;
 
-  console.log(
-    '[Recording Template] SCREEN TRACKS',
-    screenShareTracks.map((t) => ({
-      identity: t.participant?.identity,
-      source: t.source,
-      hasTrack: !!t.track,
-      subscribed: t.publication?.isSubscribed,
-      trackSid: t.publication?.trackSid,
-    }))
-  );
+    const pub = trackRef.publication;
+    if (!pub) return false;
 
-  // --------------------------------------------------
-  // Remove Egress recorder
-  // --------------------------------------------------
-  const validCameras = cameraTracks.filter((trackRef) => {
-    const identity =
-      trackRef.participant?.identity?.toLowerCase() || '';
+    // When camera is turned OFF or screen share stopped, pub.isMuted is true
+    if (pub.isMuted) return false;
 
-    return (
-      !identity.includes('egress') &&
-      !identity.includes('recorder') &&
-      !!trackRef.track
-    );
-  });
+    // Track is active when publication has an attached track or is subscribed
+    return !!(pub.track || pub.isSubscribed || trackRef.track);
+  };
 
-  const validScreens = screenShareTracks.filter((trackRef) => {
-    const identity =
-      trackRef.participant?.identity?.toLowerCase() || '';
-
-    return (
-      !identity.includes('egress') &&
-      !identity.includes('recorder') &&
-      !!trackRef.track
-    );
-  });
+  const validCameras = cameraTracks.filter(isVideoTrackActive);
+  const validScreens = screenShareTracks.filter(isVideoTrackActive);
 
   // --------------------------------------------------
   // Screen share priority
