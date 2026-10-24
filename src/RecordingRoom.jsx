@@ -301,12 +301,21 @@ export default function RecordingRoom() {
             className="video-element"
           />
         </div>
+
+        {validCameras.length > 0 && (
+          <div className="teacher-pip">
+            <VideoTrack
+              trackRef={validCameras[0]}
+              className="video-element-pip"
+            />
+          </div>
+        )}
       </div>
     );
   }
 
   // --------------------------------------------------
-  // Camera grid
+  // Camera view
   // --------------------------------------------------
   if (validCameras.length > 0) {
     console.log(
@@ -318,31 +327,49 @@ export default function RecordingRoom() {
       <div className="recording-container">
         <RoomAudioRenderer />
 
-        <div
-          className="multi-camera-grid"
-          data-count={Math.min(validCameras.length, 9)}
-        >
-          {validCameras.map((trackRef) => (
-            <VideoTrack
-              key={trackRef.publication.trackSid}
-              trackRef={trackRef}
-              className="video-element"
-            />
-          ))}
+        <div className="teacher-screen">
+          <VideoTrack
+            trackRef={validCameras[0]}
+            className="video-element-cover"
+          />
         </div>
       </div>
     );
   }
 
   // --------------------------------------------------
-  // No video yet
+  // No camera & No screen share: Show Academy Logo Standby (Never pure black)
   // --------------------------------------------------
   return (
-    <div className="recording-container">
+    <div className="recording-container academy-standby">
       <RoomAudioRenderer />
 
-      <div className="waiting-video">
-        Waiting for video tracks...
+      <div className="standby-card">
+        <div className="logo-wrapper">
+          <img
+            src="/logo.png"
+            alt="Dr. Sam Reefath Radiology Academy"
+            className="standby-logo"
+            onError={(e) => {
+              // Graceful fallback to text if image fails to load
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        </div>
+
+        <h1 className="standby-title">Dr. Sam Reefath Radiology Academy</h1>
+        <p className="standby-subtitle">Live Class Lecture in Progress</p>
+
+        <div className="audio-live-badge">
+          <div className="equalizer">
+            <span className="eq-bar eq-bar-1"></span>
+            <span className="eq-bar eq-bar-2"></span>
+            <span className="eq-bar eq-bar-3"></span>
+            <span className="eq-bar eq-bar-4"></span>
+            <span className="eq-bar eq-bar-5"></span>
+          </div>
+          <span className="badge-text">Audio Stream Active</span>
+        </div>
       </div>
     </div>
   );
